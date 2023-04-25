@@ -17,11 +17,11 @@ def topo_batch(directory: str, alpha: float, beta: float, batch_size: int):
    energy_cutoff, barrier_cutoff = calc_cutoffs(min_energies, alpha, beta)
    min_energies_cut, banned_minima = cut_energies(min_energies, energy_cutoff)
    G = preprocess_network(min_energies_cut, ts_energies, ts_connections)
-   batch = Monotonic(G, min_energies_cut)
+   batch = monotonic(G, min_energies_cut)
    batch = order_batch(batch, min_energies)
    output_batch("Monotonic", batch, directory)
    if len(batch) < batch_size:
-      batch = BarrierSelection(G, batch, banned_minima, barrier_cutoff, min_energies, ts_energies, ts_connections)
+      batch = barrier_selection(G, batch, banned_minima, barrier_cutoff, min_energies, ts_energies, ts_connections)
       batch = order_batch(batch, min_energies)
       output_batch("BarrierSelection", batch, directory)
 
@@ -84,10 +84,10 @@ def preprocess_network(min_energies: np.array, ts_energies: np.array, ts_connect
       G.add_edge(int(ts_connections[i,0]), int(ts_connections[i,1]), energy=ts_energies[i])
    return G
 
-def Monotonic(G, min_energies):
+def monotonic(G, min_energies):
    MSB = []
    for i in range(np.size(min_energies, axis=0)): # Sum over minima
-      monotonic = True
+      monotonic_flag = True
       energy_i = min_energies[i]
       i_edges = list(G.edges())
       for j in list(i_edges): # Sum over each minima pair connected via a ts.
@@ -101,12 +101,12 @@ def Monotonic(G, min_energies):
             else:
                energy_j = min_energies[min1]
             if (energy_j <= energy_i): # If min i is connected to higher energy minima, label as not monotonic.
-               monotonic = False
-      if (monotonic):
+               monotonic_flag = False
+      if (monotonic_flag):
          MSB.append(i)
    return MSB
 
-def BarrierSelection(G, batch, banned_minima, barrier_cutoff, min_energies, ts_energies, ts_connections):
+def barrier_selection(G, batch, banned_minima, barrier_cutoff, min_energies, ts_energies, ts_connections):
    for i in range(np.size(min_energies, axis=0)): # Sum over all minima
        if (i in batch): # Ignore lowest energy minima of each basin
            continue
