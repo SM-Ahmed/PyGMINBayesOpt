@@ -54,7 +54,7 @@ def choose_test_points(params: dict):
         prep_one_singlepoint(central_coords, params["v_min"], params["cluster_flag"], params["ortho_flag"])
         return 1
     read_lowestGP()
-    num_minima = import_minima(central_coords, params["bayesopt_optim_exec"], params["bayesopt_pathsample_exec"])
+    num_minima = import_minima(central_coords, params)
     if (num_minima == 0): # All OPTIM minimisations failed, so sample point from lowestEI.xyz.
         prep_one_singlepoint(central_coords, params["v_min"], params["cluster_flag"], params["ortho_flag"])
         return 1
@@ -132,15 +132,17 @@ def prep_one_singlepoint(coords: list, v_min: float, cluster_flag: bool, ortho_f
             output_coords(point, 1, True)
         break
 
-def import_minima(coords: list, bayesopt_optim_exec: str, bayesopt_pathsample_exec: str) -> bool:
+def import_minima(coords: list, params: dict) -> bool:
     '''Import AF minima via OPTIM/PATHSAMPLE to make min.data file.
     Returns 0, 1, or 2 if min.data contains 0, 1, or more than 1 minima respectively.'''
     minima_index = 0
     for minima in coords:
         minima_index += 1
         prep_optim_min(minima, minima_index)
-    run_optim_min(minima_index, bayesopt_optim_exec) # Perform minimisation for each minima in lowestEI file via OPTIM.
-    import_pathsample_min(minima_index, bayesopt_pathsample_exec) # Import lowestEI minima into PATHSAMPLE.
+    run_optim_min(minima_index, params["bayesopt_optim_exec"]) # Perform minimisation for each minima in lowestEI file via OPTIM.
+    check_optim_min(minima_index, params["a_min"], params["a_max"], params["a_bound_width"],
+                           params["angle_min"], params["angle_max"], params["angle_bound_width"], params["ortho_flag"]) 
+    import_pathsample_min(minima_index, params["bayesopt_pathsample_exec"]) # Import lowestEI minima into PATHSAMPLE.
     min_data_path = os.path.join("Topo_Batch", "import_min", "min.data")
     if os.stat(min_data_path).st_size == 0:
         return 0
@@ -152,7 +154,6 @@ def check_good_cell(cell_params: np.array, v_min: float, cluster_flag: bool, ort
     Returns true for an acceptable cell volume. Always returns true for clusters and orthorhombic cells.'''
     if cluster_flag == False and ortho_flag == False: # True for non-orthorhombic cell
         vol = util.calc_cell_vol(cell_params)
-        print(vol)
         return (np.isreal(vol) == True) and (vol > v_min) # True for physical unit cell volume.
     else:
         return True
@@ -192,6 +193,28 @@ def run_optim_min(num_minima: int, bayesopt_optim_exec: str):
         directory_name = "Topo_Batch/min" + str(minima+1)
         subprocess.Popen([bayesopt_optim_exec], cwd = directory_name).wait()
 
+def check_optim_min(num_minima: int, a_min: float, a_max: float, a_bound_width: float,
+                        angle_min: float, angle_max: float, angle_bound_width: float, ortho_flag: bool):
+    '''Checks if OPTIM minimisation converged to bounds. If so, renames directory so it will not be imported into PATHSAMPLE.'''
+    '''Currently only works for single atom cells.'''
+    for minima in range(num_minima):
+        min_path = os.path.join("Topo_Batch", "min" + str(minima+1), "min.data.info")
+        with open(min_path) as file: # Read min.data.info file
+            min_data = file.readlines()
+        cell = np.zeros(6)
+        cell_info = min_data[-2:] # Last two lines of file correspond to cell lengths and cell angles.
+        counter = 0
+        for line in cell_info:
+            for value in line.split():
+                cell[counter] = float(value)
+                counter += 1
+        print(cell)
+        if check_central_minima(cell, a_min, a_max, a_bound_width, angle_min, angle_max, angle_bound_width, ortho_flag):
+            continue
+        directory_old = os.path.join("Topo_Batch", "min" + str(minima+1))
+        directory_new = os.path.join("Topo_Batch", "min" + str(minima+1) + "_bounds")
+        os.rename(directory_old, directory_new)
+
 def import_pathsample_min(num_minima: int, bayesopt_pathsample_exec: str):
     '''Parse OPTIM minimisation files to create min.data.info.initial file.
     Run PATHSAMPLE to import minima.'''
@@ -201,6 +224,8 @@ def import_pathsample_min(num_minima: int, bayesopt_pathsample_exec: str):
         pass
     for minima in range(num_minima):
         min_path = os.path.join("Topo_Batch", "min" + str(minima+1), "min.data.info")
+        if os.path.exists(min_path) == False:
+            continue
         with open(min_path) as file: # Read min.data.info file
             min_data = file.readlines()
         with open(min_data_path, "a") as file: # Add data to min.data.info.initial file.
