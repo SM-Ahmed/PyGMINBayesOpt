@@ -2,14 +2,63 @@ import os
 import numpy as np
 import subprocess
 
+from .utils import util
+from .bayesopt import check_central_minima, check_good_cell
+
 def main():
     num_runs = 10
-    analyse_runs(num_runs)
+    topo_batch_flag = True
+    disconnection_exec = "/home/sma86/softwarewales/DISCONNECT/build/disconnectionDPS"
+    analyse_runs(num_runs, topo_batch_flag, disconnection_exec)
 
-def analyse_runs(num_runs: int):
+def analyse_runs(num_runs: int, params: dict = None, topo_batch_flag: bool = False, disconnection_exec: str = ""):
+    #count_points_per_epoch(num_runs)
+    if (topo_batch_flag):
+        get_dgraphs(num_runs, disconnection_exec)
+    classify_minima(num_runs, params)
     report_best_run(num_runs)
     count_empty_lowestGP(num_runs)
     energy_vs_calls(num_runs)
+
+
+def classify_minima(num_runs, params):
+    training = np.loadtxt(os.path.join("run"+str(num_runs), "training"))
+    counter = 0
+    bounds_counter = 0
+    nonphysical_counter = 0
+    for point in training:
+        print(counter)
+        central_flag = check_central_minima(point[-6:], params["a_min"], params["a_max"], params["a_bound_width"],
+                        params["angle_min"], params["angle_max"], params["angle_bound_width"], params["ortho_flag"])
+        if central_flag == False:
+            bounds_counter += 1
+            print("bounds")
+            counter += 1
+            continue
+        good_cell_flag = check_good_cell(point[-6:], params["v_min"], params["cluster_flag"], params["ortho_flag"])
+        if good_cell_flag == False:
+            nonphysical_counter += 1
+            print("nonphysical")
+        counter += 1
+    print("Number of minima at bounds: " + str(bounds_counter))
+    print("Number of minima with non-physical cell geometries: " + str(nonphysical_counter))
+    print("Number of minima where potential called: " + str(counter - bounds_counter - nonphysical_counter))
+
+def get_dgraphs(num_runs: int, disconnection_exec: str):
+    for i in range(num_runs-1):
+        topo_batch_path = os.path.join("run" + str(i+1), "Topo_Batch", "topo_batch")
+        if os.path.exists(topo_batch_path) == False:
+            continue
+        disconnection_folder = os.path.join("run" + str(i+1), "Topo_Batch", "disconnection")
+        topo_folder = "run" + str(i+1) + r"/Topo_Batch/"
+        if os.path.exists(disconnection_folder) == False:
+            subprocess.Popen(["mkdir", topo_folder + r"disconnection"]).wait()
+        subprocess.Popen(["cp", "-r", topo_folder + r"topo_batch/min.data", topo_folder + r"disconnection/min.data"]).wait()
+        subprocess.Popen(["cp", "-r", topo_folder + r"topo_batch/ts.data", topo_folder + r"disconnection/ts.data"]).wait()
+        subprocess.Popen(["cp", "-r", "analysis/disconnection/dinfo", topo_folder + r"disconnection/dinfo"]).wait()
+        subprocess.Popen([disconnection_exec], cwd = disconnection_folder).wait()
+        subprocess.Popen(["cp", "-r", topo_folder + r"disconnection/tree.ps",
+                           r"analysis/disconnection/" + "tree" + str(i+1) + r".eps"]).wait()
 
 def report_best_run(num_runs: int):
     response_path = "run" + str(num_runs) + r"/response"
@@ -103,7 +152,7 @@ def filter_response(num_runs: int) -> tuple:
     print("Total response size: " + str(np.shape(response)[0]))
     print("Total rows checked: " + str(response_index))
     print("Total training rows: " + str(len(training_rows)))
-    print("Total bad rows: " + str(len(bad_coords_rows)))
+    print("Total bad rows: " + str(len(bad_coords_rows))) 
     print("Final good rows: " + str(np.shape(good_bayesopt_response)[0]))
     return good_response
 
